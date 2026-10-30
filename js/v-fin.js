@@ -241,16 +241,37 @@ FORM.fFixed = async (f,v) => {
 ACT.fxdel = async (el,D) => { const f=DB.fixed.find(x=>x.id==D.id); if(!await ask('Eliminare la spesa fissa?',`«${f.name}» non verrà più considerata dall'analizzatore.`)) return; await del('fixed',f.id); closeSheet(); render(); toast('Spesa fissa eliminata'); };
 
 /* ---------------- CONTI ---------------- */
+// saldo di un conto a una certa data (ultimo punto di storico ≤ data); null se non c'è ancora
+function accBalanceAt(accId, date){
+  let v=null; for(const h of DB.acchist){ if(h.account_id!=accId) continue; if(h.date>date) break; v=h.balance; } return v;
+}
+// serie della liquidità totale: un punto per ogni data in cui almeno un conto è stato aggiornato
+function liquiditySeries(){
+  const dates=[...new Set(DB.acchist.filter(h=>DB.accounts.some(a=>a.id==h.account_id)).map(h=>h.date))].sort();
+  // se un conto non ha ancora rilevazioni a quella data si usa il suo primo saldo noto (evita salti finti)
+  const first = id => DB.acchist.find(h=>h.account_id==id)?.balance ?? 0;
+  return dates.map(d=>({d, v:DB.accounts.reduce((s,a)=>s+(accBalanceAt(a.id,d)??first(a.id)),0)}));
+}
+const histLabel = (dates) => { const multiYear = dates.length && dates[0].slice(0,4)!==dates[dates.length-1].slice(0,4); return dates.map(d=>{const x=pd(d); return fmtDay(x)+(multiYear?' '+String(x.getFullYear()).slice(2):'');}); };
 function finConti(){
   const tot = DB.accounts.reduce((s,a)=>s+a.balance,0);
   const invTag = tagByName('investimenti')?.id;
   const inv = DB.tx.filter(t=>t.tag==invTag).sort((a,b)=>b.date.localeCompare(a.date));
   const invTot = -inv.reduce((s,t)=>s+t.amt,0);
   const pac = DB.fixed.filter(f=>f.active && f.tag_id==invTag);
+  const ser = liquiditySeries();
+  // variazione rispetto a ~30 giorni fa
+  const d30 = iso(addDays(today(),-30)); const past = [...ser].reverse().find(p=>p.d<=d30);
+  const delta = past ? tot - past.v : null;
+  const accDelta = a => { const hs=DB.acchist.filter(h=>h.account_id==a.id); if(hs.length<2) return ''; const d=hs[hs.length-1].balance-hs[hs.length-2].balance; if(!d) return ''; return `<span class="mono small ${d>0?'pos':'neg'}" style="font-weight:700">${d>0?'+':'−'}${eur0(Math.abs(d))}</span>`; };
   $('#finBody').innerHTML = `
-    <div class="card" style="background:var(--ink);color:var(--bg)"><div class="eyebrow" style="color:color-mix(in srgb,var(--bg) 70%,transparent)">Patrimonio</div><div class="big mono" style="font-size:34px;margin:4px 0">${eur(tot+invTot)}</div><div style="font-size:13px;opacity:.75">liquidità ${eur(tot)} · investito ${eur(invTot)}</div></div>
-    <div class="section-h"><h2>Conti</h2><span class="faint small">tocca un conto per aggiornare il saldo</span></div>
-    <div class="grid-auto">${DB.accounts.map(a=>`<button class="catcard tap" data-act="acc" data-id="${a.id}"><div class="row"><div class="ico" style="--c:var(--fin);--s:var(--fin-soft)">${ic('wallet')}</div><b class="grow">${esc(a.name)}</b>${ic('edit','style="width:18px;height:18px;color:var(--faint)"')}</div><div class="amt">${eur(a.balance)}</div><div class="faint" style="font-size:12px">aggiornato il ${fmtDay(pd(a.updated_at))}</div></button>`).join('')||'<div class="empty">Nessun conto: aggiungine uno con il pulsante in basso (es. conto corrente, deposito, contanti).</div>'}</div>
+    <div class="card" style="background:var(--ink);color:var(--bg)"><div class="eyebrow" style="color:color-mix(in srgb,var(--bg) 70%,transparent)">Patrimonio</div><div class="big mono" style="font-size:34px;margin:4px 0">${eur(tot+invTot)}</div><div style="font-size:13px;opacity:.75">liquidità ${eur(tot)} · investito ${eur(invTot)}${delta!=null?` · ${delta>=0?'+':'−'}${eur0(Math.abs(delta))} in 30 giorni`:''}</div></div>
+    <div class="card"><div class="section-h" style="margin:0 0 6px"><h2>Andamento liquidità</h2><span class="faint small">somma dei conti</span></div>
+      ${ser.length>1 ? lineChart(ser.map(p=>p.v), histLabel(ser.map(p=>p.d)), {color:'var(--fin)', dec:0, unit:' €'})
+        : `<div class="muted small" style="padding:6px 0 4px">Lo storico si costruisce da solo: ogni volta che aggiorni il saldo di un conto viene salvato un punto. Puoi anche inserire saldi passati (es. dagli estratti conto) scegliendo la data nella scheda del conto.</div>`}
+    </div>
+    <div class="section-h"><h2>Conti</h2><span class="faint small">tocca un conto per saldo e storico</span></div>
+    <div class="grid-auto">${DB.accounts.map(a=>`<button class="catcard tap" data-act="acc" data-id="${a.id}"><div class="row"><div class="ico" style="--c:var(--fin);--s:var(--fin-soft)">${ic('wallet')}</div><b class="grow">${esc(a.name)}</b>${ic('edit','style="width:18px;height:18px;color:var(--faint)"')}</div><div class="row" style="align-items:baseline;gap:10px"><div class="amt">${eur(a.balance)}</div>${accDelta(a)}</div><div class="faint" style="font-size:12px">aggiornato il ${fmtDay(pd(a.updated_at))} · ${DB.acchist.filter(h=>h.account_id==a.id).length} rilevazioni</div></button>`).join('')||'<div class="empty">Nessun conto: aggiungine uno con il pulsante in basso (es. conto corrente, deposito, contanti).</div>'}</div>
     <div class="section-h"><h2>Investimenti</h2><span class="faint small">categoria «investimenti»</span></div>
     <div class="card"><div class="list">${pac.map(f=>`<div class="li"><div class="ico">${ic('bolt')}</div><div class="grow"><div style="font-weight:600">${esc(f.name)} attivo</div><div class="muted small">${eur(f.amount)} il ${f.day} · prossimo ${fmtDay(nextFixedDate(f))}</div></div></div>`).join('')}
       ${inv.map(t=>`<div class="li"><div class="ico" style="--c:#14866D;--s:color-mix(in srgb,#14866D 15%,transparent)">${ic('fin')}</div><div class="grow"><div style="font-weight:600">${esc(t.note)||'Investimento'}</div><div class="muted small">${fmtDay(pd(t.date))} ${t.date.slice(0,4)}</div></div><span class="mono" style="font-weight:600">${eur(-t.amt)}</span></div>`).join('')||'<div class="muted small" style="padding:8px 0">Nessun movimento di investimento</div>'}</div></div>`;
@@ -258,19 +279,55 @@ function finConti(){
 ACT.acc = (el,D) => sheetAcc(+D.id);
 ACT.newacc = () => sheetAcc(null);
 function sheetAcc(id){
-  const a = id?DB.accounts.find(x=>x.id==id):{name:'',balance:''};
-  openSheet(sheetHead(id?esc(a.name):'Nuovo conto',id?'Aggiorna il saldo attuale':'', 'wallet','var(--fin)','var(--fin-soft)'),`
-  <form class="stack" id="fAcc" data-id="${id||''}">
-    <div class="field"><label for="accName">Nome</label><input class="input" id="accName" value="${esc(a.name)}" required placeholder="Es. Conto corrente"></div>
-    <div class="field"><label for="accBal">Saldo attuale</label><input class="input mono" id="accBal" inputmode="decimal" value="${a.balance!==''?String(a.balance).replace('.',','):''}" required style="font-size:26px"></div>
-    <button class="btn block" style="background:var(--fin);color:#fff" type="submit">Salva</button>
-    ${id?`<button class="btn danger block" type="button" data-act="accdel" data-id="${id}">${ic('trash')}Elimina conto</button>`:''}
-  </form>`);
+  const draw = () => {
+    const a = id?DB.accounts.find(x=>x.id==id):{name:'',balance:''};
+    if(!a){ closeSheet(); return; }
+    const hs = id ? DB.acchist.filter(h=>h.account_id==id) : [];
+    const rows = hs.map((h,i)=>({...h, d: i? h.balance-hs[i-1].balance : null})).reverse();
+    openSheet(sheetHead(id?esc(a.name):'Nuovo conto',id?`Saldo ${eur(a.balance)} · aggiornato il ${fmtDay(pd(a.updated_at))}`:'', 'wallet','var(--fin)','var(--fin-soft)'),`
+    <form class="stack" id="fAcc" data-id="${id||''}">
+      <div class="field"><label for="accName">Nome</label><input class="input" id="accName" value="${esc(a.name)}" required placeholder="Es. Conto corrente"></div>
+      <div class="grid2">
+        <div class="field"><label for="accBal">${id?'Nuovo saldo':'Saldo attuale'}</label><input class="input mono" id="accBal" inputmode="decimal" value="${a.balance!==''?String(a.balance).replace('.',','):''}" required style="font-size:22px"></div>
+        <div class="field"><label for="accDate">Alla data</label><input class="input" id="accDate" type="date" value="${iso(today())}" max="${iso(today())}" required></div>
+      </div>
+      <div class="faint small" style="margin-top:-4px">Con una data passata aggiungi un punto allo storico (es. da un vecchio estratto conto) senza cambiare il saldo attuale.</div>
+      <button class="btn block" style="background:var(--fin);color:#fff" type="submit">Salva</button>
+    </form>
+    ${id?`
+    <div class="card flat" style="margin-top:14px"><div class="eyebrow" style="color:var(--fin)">Andamento</div>
+      ${hs.length>1?lineChart(hs.map(h=>h.balance), histLabel(hs.map(h=>h.date)), {color:'var(--fin)', dec:0, unit:' €', h:160}):'<div class="muted small" style="padding:8px 0">Servono almeno due rilevazioni per il grafico.</div>'}
+    </div>
+    <div class="card flat" style="margin-top:12px"><div class="eyebrow">Storico saldi</div><div class="list">
+      ${rows.map(h=>`<div class="li"><div class="grow"><div style="font-weight:600">${DOW[pd(h.date).getDay()]} ${fmtDay(pd(h.date))} ${h.date.slice(0,4)}</div>${h.d!=null&&h.d!==0?`<div class="mono small ${h.d>0?'pos':'neg'}">${h.d>0?'+':'−'}${eur(Math.abs(h.d))}</div>`:''}</div><span class="mono" style="font-weight:700">${eur(h.balance)}</span>${delBtn('acchdel',`data-id="${h.id}" data-acc="${id}"`,'Elimina rilevazione')}</div>`).join('')||'<div class="muted small" style="padding:8px 0">Nessuna rilevazione</div>'}
+    </div></div>
+    <button class="btn danger block" style="margin-top:14px" type="button" data-act="accdel" data-id="${id}">${ic('trash')}Elimina conto</button>`:''}`, draw);
+  };
+  draw();
 }
 FORM.fAcc = async (f,v) => {
-  const row = {name:v('accName'), balance:pnum(v('accBal')), updated_at:iso(today())};
-  if(isNaN(row.balance)){ toast('Saldo non valido'); return; }
-  const r = f.dataset.id ? await upd('accounts',+f.dataset.id,row) : await ins('accounts',row); r.balance=Number(r.balance);
-  closeSheet(); render(); toast('Saldo salvato');
+  const bal = pnum(v('accBal')), date = v('accDate') || iso(today());
+  if(isNaN(bal)){ toast('Saldo non valido'); return; }
+  const id = f.dataset.id ? +f.dataset.id : null;
+  let acc;
+  if(id){
+    const a = DB.accounts.find(x=>x.id==id); const patch = {name:v('accName')};
+    if(date >= a.updated_at){ patch.balance = bal; patch.updated_at = date; } // è il dato più recente: diventa il saldo attuale
+    acc = await upd('accounts',id,patch); acc.balance=Number(acc.balance);
+  } else {
+    acc = await ins('accounts',{name:v('accName'), balance:bal, updated_at:date}); acc.balance=Number(acc.balance);
+  }
+  await setAccHist(acc.id, date, bal);
+  if(id) { refresh(); toast(date===iso(today())?'Saldo salvato':'Rilevazione del '+fmtDay(pd(date))+' salvata'); }
+  else { closeSheet(); render(); toast('Conto creato'); }
 };
-ACT.accdel = async (el,D) => { const a=DB.accounts.find(x=>x.id==D.id); if(!await ask('Eliminare il conto?',`«${a.name}»`)) return; await del('accounts',a.id); closeSheet(); render(); };
+ACT.acchdel = async (el,D) => {
+  const h = DB.acchist.find(x=>x.id==D.id); if(!h) return;
+  if(!await ask('Eliminare la rilevazione?',`${fmtDay(pd(h.date))} ${h.date.slice(0,4)} · ${eur(h.balance)}`)) return;
+  await del('acchist',h.id);
+  // se era l'ultima, il saldo attuale torna alla rilevazione precedente
+  const a = DB.accounts.find(x=>x.id==D.acc); const hs = DB.acchist.filter(x=>x.account_id==a.id); const last = hs[hs.length-1];
+  if(last && (last.date!==a.updated_at || last.balance!==a.balance)){ const r=await upd('accounts',a.id,{balance:last.balance, updated_at:last.date}); r.balance=Number(r.balance); }
+  refresh(); toast('Rilevazione eliminata');
+};
+ACT.accdel = async (el,D) => { const a=DB.accounts.find(x=>x.id==D.id); if(!await ask('Eliminare il conto?',`«${a.name}» e tutto il suo storico`)) return; await del('accounts',a.id); DB.acchist = DB.acchist.filter(h=>h.account_id!=a.id); closeSheet(); render(); };

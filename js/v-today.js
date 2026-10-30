@@ -30,16 +30,21 @@ VIEWS.oggi = function(){
     let nx=null; for(let i=1;i<8;i++){ const dd=addDays(d,i); const w=workoutsOn(iso(dd)); if(w.length){ nx={dd,s:w[0]}; break; } }
     items.push({time:'18:30',c:'var(--line)',html:`<div class="ev skip"><div class="h">${ic('sport','style="width:18px;height:18px;color:var(--faint)"')}<b style="color:var(--muted)">Riposo</b><button class="meta link" data-act="addwo" data-day="${iso(d)}">+ Aggiungi</button></div>${nx?`<div class="sub">Prossimo: ${DOWL[nx.dd.getDay()]} · ${esc(nx.s.title)}</div>`:''}</div>`});
   }
-  items.sort((a,b)=>a.time.localeCompare(b.time));
+  eventsOn(iso(d)).filter(e=>e.kind==='attivita').forEach(e=>{
+    items.push({time:e.time||'—',sort:e.time||'00:00',c:'var(--accent)',html:`<button class="ev tap act ${e.done?'done':''}" style="--c:var(--accent)" data-act="ev" data-id="${e.id}"><div class="h">${ic('pin','style="width:18px;height:18px;color:var(--accent)"')}<b>${esc(e.title)}</b><span class="meta">${e.time?`<span class="pill neutral mono">${esc(e.time)}</span>`:''}${ic('right','style="width:18px;height:18px;color:var(--faint)"')}</span></div>${e.note?`<div class="sub">${esc(e.note)}</div>`:''}</button>`});
+  });
+  items.sort((a,b)=>(a.sort||a.time).localeCompare(b.sort||b.time));
+  const rems = remindersFor(d);
   const goals = DB.goals.slice(0,4);
 
   $('#view').innerHTML = `
   <div class="phead"><span class="eyebrow">${DOWL[d.getDay()]} ${d.getDate()} ${MONL[d.getMonth()].toLowerCase()} ${d.getFullYear()}</span><h1>${isToday?hello+', Marco':DOWL[d.getDay()]+' '+fmtDay(d)}</h1></div>
   <div class="stack">
     ${installBanner()}
-    <div class="row" style="justify-content:space-between"><button class="iconbtn solid" data-act="wk" data-n="-7" aria-label="Settimana precedente">${ic('left')}</button><button class="muted" style="font-weight:700;font-size:14px;min-height:44px" data-act="todayjump">${isToday?'Settimana '+fmtDay(mon)+' – '+fmtDay(addDays(mon,6)):'Torna a oggi'}</button><button class="iconbtn solid" data-act="wk" data-n="7" aria-label="Settimana successiva">${ic('right')}</button></div>
-    <div class="week">${Array.from({length:7},(_,i)=>{const dd=addDays(mon,i); const p=workoutsOn(iso(dd)); const mk=[]; if(p.length) mk.push(p.every(x=>x.done)?'var(--sport)':'color-mix(in srgb,var(--sport) 40%,transparent)'); if(dd.getDay()>0&&dd.getDay()<6) mk.push('var(--work)'); if(mealFor(dd,'cena')?.free) mk.push('var(--fin)');
-      return `<button class="wd ${sameDay(dd,d)?'on':''} ${sameDay(dd,T0)?'today':''}" data-act="day" data-d="${iso(dd)}"><span class="l">${DOW[dd.getDay()]}</span><span class="n">${dd.getDate()}</span><span class="marks">${mk.map(c=>`<i style="background:${c}"></i>`).join('')}</span></button>`}).join('')}</div>
+    <div class="row" style="justify-content:space-between"><button class="iconbtn solid" data-act="wk" data-n="-7" aria-label="Settimana precedente">${ic('left')}</button><button class="muted grow" style="font-weight:700;font-size:14px;min-height:44px" data-act="todayjump">${isToday?'Settimana '+fmtDay(mon)+' – '+fmtDay(addDays(mon,6)):'Torna a oggi'}</button><button class="iconbtn solid" data-act="month" aria-label="Calendario del mese">${ic('cal')}</button><button class="iconbtn solid" data-act="wk" data-n="7" aria-label="Settimana successiva">${ic('right')}</button></div>
+    <div class="week">${Array.from({length:7},(_,i)=>{const dd=addDays(mon,i); const p=workoutsOn(iso(dd)); const mk=[]; if(p.length) mk.push(p.every(x=>x.done)?'var(--sport)':'color-mix(in srgb,var(--sport) 40%,transparent)'); if(dd.getDay()>0&&dd.getDay()<6) mk.push('var(--work)'); if(mealFor(dd,'cena')?.free) mk.push('var(--fin)'); if(eventsOn(iso(dd)).some(e=>e.kind==='attivita')) mk.push('var(--accent)');
+      return `<button class="wd ${sameDay(dd,d)?'on':''} ${sameDay(dd,T0)?'today':''} ${dayHasReminder(dd)?'rem':''}" data-act="day" data-d="${iso(dd)}">${dayHasReminder(dd)?`<span class="bell">${ic('bell')}</span>`:''}<span class="l">${DOW[dd.getDay()]}</span><span class="n">${dd.getDate()}</span><span class="marks">${mk.map(c=>`<i style="background:${c}"></i>`).join('')}</span></button>`}).join('')}</div>
+    ${rems.length?remCard(rems,d):''}
     <div class="cols">
       <div class="stack">
         <div class="kpis">
@@ -57,7 +62,7 @@ VIEWS.oggi = function(){
       </div>
     </div>
   </div>`;
-  fab(null);
+  fab('Aggiungi','var(--accent)','newev');
 };
 function advisorCard(a,compact){
   const lines = [
@@ -104,6 +109,82 @@ function sheetWorkday(){
 ACT.unblock = async (el,D) => { const p = DB.projects.find(x=>x.id==D.id); await upd('projects',p.id,{status:'attivo'}); refresh(); toast(p.name+' torna attivo'); };
 
 function goalMini(g){ const e=goalErr(g); return `<button class="li" data-act="goal" data-id="${g.id}">${e?ring(e.p,e.ok?'var(--good)':'var(--warn)'):`<div class="ico">${ic('goal')}</div>`}<div class="grow"><div style="font-weight:600;font-size:15px">${esc(g.name)}</div><div class="muted mono" style="font-size:12px">${goalLine(g)}${e?` · errore ${e.txt}`:''}</div></div>${g.area?`<span class="pill neutral">${esc(g.area)}</span>`:''}</button>`; }
+
+/* =====================================================================
+   CALENDARIO · reminder (da spuntare, restano in evidenza finché non li fai)
+               e attività con orario (es. «Parrucchiere ore 18»)
+   ===================================================================== */
+const eventsOn = date => DB.events.filter(e=>e.date===date).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+// reminder da mostrare nel giorno d: quelli del giorno + (se d è oggi) quelli passati non ancora fatti
+function remindersFor(d){
+  const di = iso(d), isT = sameDay(d,today());
+  return DB.events.filter(e=>e.kind==='reminder' && (e.date===di || (isT && e.date<di && !e.done)))
+    .sort((a,b)=>a.done-b.done || a.date.localeCompare(b.date) || (a.time||'').localeCompare(b.time||''));
+}
+const dayHasReminder = d => DB.events.some(e=>e.kind==='reminder' && e.date===iso(d) && !e.done);
+function remCard(rems,d){
+  const open = rems.filter(r=>!r.done).length;
+  return `<div class="remcard ${open?'lit':''}"><div class="row" style="gap:10px"><div class="ico" style="--c:var(--rem);--s:var(--rem-soft)">${ic('bell')}</div><div class="grow"><b style="font-family:var(--f-display);font-size:17px">Promemoria</b><div class="muted small">${open?`${open} da fare`:'tutti fatti'}${sameDay(d,today())?'':' · '+fmtDay(d)}</div></div><button class="link" data-act="newev" data-kind="reminder">+ Aggiungi</button></div>
+    <div class="list" style="margin-top:6px">${rems.map(r=>{ const late = !r.done && r.date<iso(today());
+      return `<div class="li rem ${r.done?'done':''}"><button class="check ${r.done?'on':''}" style="--c:var(--rem)" data-act="evdone" data-id="${r.id}" aria-label="Fatto">${ic('check')}</button><button class="grow" style="text-align:left;min-height:44px" data-act="ev" data-id="${r.id}"><div style="font-weight:700">${esc(r.title)}</div><div class="muted small">${[r.time?'ore '+esc(r.time):'',late?`<span class="pill bad">dal ${fmtDay(pd(r.date))}</span>`:'',esc(r.note||'')].filter(Boolean).join(' · ')}</div></button></div>`; }).join('')}</div></div>`;
+}
+ACT.newev = (el,D) => sheetEvent(null, D.kind||'attivita', D.day || iso(S.day));
+ACT.ev = (el,D) => sheetEvent(+D.id);
+ACT.evdone = async (el,D) => { const e=DB.events.find(x=>x.id==D.id); await upd('events',e.id,{done:!e.done}); refresh(); if(e.done) toast('Fatto: '+e.title,{undo:async()=>{ await upd('events',e.id,{done:false}); refresh(); }}); };
+function sheetEvent(id, kind='attivita', day){
+  const e = id ? DB.events.find(x=>x.id==id) : {kind, date:day, time:'', title:'', note:''};
+  if(!e) return;
+  openSheet(sheetHead(id?'Modifica':'Nuovo nel calendario', id?(e.kind==='reminder'?'Promemoria':'Attività'):'', e.kind==='reminder'?'bell':'pin', e.kind==='reminder'?'var(--rem)':'var(--accent)', e.kind==='reminder'?'var(--rem-soft)':'var(--accent-soft)'),`
+  <form class="stack" id="fEv" data-id="${id||''}">
+    <div class="chips wrapped">
+      <label class="chip"><input type="radio" name="evKind" value="attivita" ${e.kind==='attivita'?'checked':''}>${ic('pin','style="width:16px;height:16px"')}Attività</label>
+      <label class="chip"><input type="radio" name="evKind" value="reminder" ${e.kind==='reminder'?'checked':''}>${ic('bell','style="width:16px;height:16px"')}Promemoria</label>
+    </div>
+    <div class="faint small" style="margin-top:-4px">Attività: un impegno a un'ora precisa, compare nella giornata. Promemoria: una cosa da fare quel giorno, resta evidenziata finché non la spunti.</div>
+    <div class="field"><label for="evTitle">Cosa</label><input class="input" id="evTitle" value="${esc(e.title)}" required placeholder="Es. Parrucchiere" ${id?'':'autofocus'}></div>
+    <div class="grid2">
+      <div class="field"><label for="evDate">Giorno</label><input class="input" id="evDate" type="date" value="${e.date}" required></div>
+      <div class="field"><label for="evTime">Ora <span class="faint">(facoltativa)</span></label><input class="input" id="evTime" type="time" value="${esc(e.time||'')}"></div>
+    </div>
+    <div class="field"><label for="evNote">Note</label><input class="input" id="evNote" value="${esc(e.note||'')}" placeholder="facoltative"></div>
+    <button class="btn accent block" type="submit">Salva</button>
+    ${id?`<button class="btn danger block" type="button" data-act="evdel" data-id="${id}">${ic('trash')}Elimina</button>`:''}
+  </form>`);
+}
+FORM.fEv = async (f,v) => {
+  const row = { kind: f.querySelector('input[name=evKind]:checked')?.value || 'attivita', title:v('evTitle'), date:v('evDate'), time:v('evTime')||null, note:v('evNote') };
+  if(!row.title || !row.date){ toast('Inserisci cosa e il giorno'); return; }
+  if(f.dataset.id) await upd('events',+f.dataset.id,row); else await ins('events',row);
+  DB.events.sort((a,b)=>a.date.localeCompare(b.date));
+  closeSheet(); S.day = pd(row.date); render();
+  toast((row.kind==='reminder'?'Promemoria':'Attività')+' salvato per '+(sameDay(pd(row.date),today())?'oggi':DOWL[pd(row.date).getDay()].toLowerCase()+' '+fmtDay(pd(row.date))));
+};
+ACT.evdel = async (el,D) => { const e=DB.events.find(x=>x.id==D.id); if(!await ask('Eliminare?',`«${e.title}» del ${fmtDay(pd(e.date))}`)) return; await del('events',e.id); closeSheet(); render(); toast('Eliminato'); };
+
+/* --- vista mese --- */
+ACT.month = () => { S.calMonth = ym(S.day); sheetMonth(); };
+ACT.calm = (el,D) => { S.calMonth = ymAdd(S.calMonth,+D.n); sheetMonth(); };
+ACT.calday = (el,D) => { S.day = pd(D.d); closeSheet(); render(); scrollTo({top:0}); };
+function sheetMonth(){
+  const draw = () => {
+    const m = S.calMonth, first = pd(m+'-01'), T0 = today();
+    const start = monday(first); const cells = [];
+    for(let dd=start; ; dd=addDays(dd,1)){ if(dd>first && ym(dd)!==m && dd.getDay()===1) break; cells.push(dd); if(cells.length>42) break; }
+    const evs = DB.events.filter(e=>e.date.startsWith(m)).sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));
+    openSheet(sheetHead(ymLabel(m),'Tocca un giorno per aprirlo','cal','var(--accent)','var(--accent-soft)'),`
+    <div class="stack">
+      <div class="row" style="justify-content:space-between"><button class="iconbtn solid" data-act="calm" data-n="-1" aria-label="Mese precedente">${ic('left')}</button><b style="font-family:var(--f-display);font-size:18px">${ymLabel(m)}</b><button class="iconbtn solid" data-act="calm" data-n="1" aria-label="Mese successivo">${ic('right')}</button></div>
+      <div class="mgrid">${['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].map(x=>`<span class="mh">${x}</span>`).join('')}
+        ${cells.map(dd=>{ const di=iso(dd), es=eventsOn(di), r=dayHasReminder(dd), a=es.some(e=>e.kind==='attivita'), w=workoutsOn(di).length;
+          return `<button class="md ${ym(dd)!==m?'out':''} ${sameDay(dd,T0)?'today':''} ${sameDay(dd,S.day)?'on':''} ${r?'rem':''}" data-act="calday" data-d="${di}"><span class="n">${dd.getDate()}</span><span class="marks">${r?'<i style="background:var(--rem)"></i>':''}${a?'<i style="background:var(--accent)"></i>':''}${w?'<i style="background:var(--sport)"></i>':''}</span></button>`; }).join('')}
+      </div>
+      <div class="row wrap faint small" style="gap:14px"><span><i class="lg" style="background:var(--rem)"></i>promemoria</span><span><i class="lg" style="background:var(--accent)"></i>attività</span><span><i class="lg" style="background:var(--sport)"></i>allenamento</span></div>
+      <div class="card flat"><div class="section-h" style="margin:0"><h2 style="font-size:17px">Nel mese</h2><button class="link" data-act="newev" data-day="${sameDay(first,T0)||ym(T0)!==m?iso(first):iso(T0)}">+ Aggiungi</button></div>
+        <div class="list">${evs.map(e=>`<button class="li" style="text-align:left;width:100%" data-act="ev" data-id="${e.id}"><div class="ico" style="--c:${e.kind==='reminder'?'var(--rem)':'var(--accent)'};--s:${e.kind==='reminder'?'var(--rem-soft)':'var(--accent-soft)'}">${ic(e.kind==='reminder'?'bell':'pin')}</div><div class="grow"><div style="font-weight:600;${e.done?'text-decoration:line-through;opacity:.6':''}">${esc(e.title)}</div><div class="muted small">${DOW[pd(e.date).getDay()]} ${fmtDay(pd(e.date))}${e.time?' · '+esc(e.time):''}</div></div></button>`).join('')||'<div class="muted small" style="padding:8px 0">Niente in calendario questo mese</div>'}</div></div>
+    </div>`, draw);
+  };
+  draw();
+}
 
 /* --- banner installazione (PWA) --- */
 let deferredPrompt = null;

@@ -2,7 +2,7 @@
    Rende l'app installabile e la fa aprire anche con rete lenta.
    Strategia: rete prima, cache come riserva (così ogni pubblicazione su GitHub Pages arriva subito).
    I dati (Supabase) non passano mai da qui. Cambia VERSION a ogni rilascio. */
-const VERSION = 'los-1.0.0';
+const VERSION = 'los-1.1.0';
 const SHELL = ['./','index.html','css/app.css','manifest.webmanifest',
   'js/config.js','js/core.js','js/db.js','js/engines.js','js/parsers.js','js/v-today.js','js/v-work.js','js/v-fin.js','js/v-sport.js','js/v-diet.js','js/v-misc.js','js/main.js',
   'vendor/supabase.js','icons/icon-192.png','icons/icon-512.png','icons/favicon-32.png'];

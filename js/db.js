@@ -14,6 +14,7 @@ const T = {
   restos:'los_restaurants', notes:'los_notes', hyrox:'los_hyrox', body:'los_body_checks',
   dishes:'los_dishes', weekmenu:'los_week_menu', overrides:'los_meal_overrides',
   plans:'los_workout_plans', workouts:'los_workouts',
+  acchist:'los_account_history', events:'los_events',
 };
 const DB = Object.fromEntries(Object.keys(T).map(k=>[k,[]]));
 DB.settings = {};
@@ -21,7 +22,8 @@ DB.user = null;
 
 const ORDER = { tags:['name',true], projects:['created_at',false], todos:['position',true], fixed:['day',true], accounts:['id',true],
   watch:['position',true], goals:['created_at',true], books:['created_at',false], restos:['created_at',false], notes:['updated_at',false],
-  hyrox:['date',true], body:['date',true], dishes:['position',true], plans:['created_at',false], workouts:['date',true] };
+  hyrox:['date',true], body:['date',true], dishes:['position',true], plans:['created_at',false], workouts:['date',true],
+  acchist:['date',true], events:['date',true] };
 
 function chk({data,error}){ if(error) throw new Error(error.message); return data; }
 
@@ -49,6 +51,7 @@ async function loadAll(){
   DB.body.forEach(b=>{ ['weight','fat_kg','fat_pct','lean_kg','muscle_kg'].forEach(f=>b[f]=b[f]==null?null:Number(b[f])); });
   DB.fixed.forEach(f=>f.amount=Number(f.amount));
   DB.accounts.forEach(a=>a.balance=Number(a.balance));
+  DB.acchist.forEach(h=>h.balance=Number(h.balance));
 }
 
 /* --- scritture --- */
@@ -90,6 +93,16 @@ async function setOverride(date, meal, dish_id){
   const r = DB.overrides.find(x=>x.date===date && x.meal===meal);
   if(r) r.dish_id = dish_id; else DB.overrides.push({date,meal,dish_id});
   chk(await sb.from('los_meal_overrides').upsert({ user_id: DB.user.id, date, meal, dish_id }));
+}
+
+/* --- storico saldi: un punto per conto per giorno (upsert) --- */
+async function setAccHist(account_id, date, balance){
+  const r = chk(await sb.from('los_account_history').upsert({ user_id: DB.user.id, account_id, date, balance }, { onConflict:'account_id,date' }).select().single());
+  r.balance = Number(r.balance);
+  const i = DB.acchist.findIndex(h=>h.account_id==account_id && h.date===date);
+  if(i>=0) DB.acchist[i] = r; else DB.acchist.push(r);
+  DB.acchist.sort((a,b)=>a.date.localeCompare(b.date));
+  return r;
 }
 
 /* --- categorie (tabella tag di ExpensesTracker) --- */
