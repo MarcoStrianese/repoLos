@@ -183,9 +183,28 @@ addEventListener('scroll', () => {
   lastY = y;
 }, {passive:true});
 
+/* --- cronologia (tasto Indietro di Android) ---
+   history.back() è asincrono: se nel frattempo si apre un'altra schermata, il «popstate»
+   arrivava dopo e la richiudeva subito (schermata che compare e sparisce, con la cronologia
+   sfasata). Ora i «back» lanciati dall'app vengono contati e ignorati, e un'apertura fatta
+   mentre un back è in corso viene registrata solo quando il back è terminato. */
+let popSkip = 0, popTimer = null, pendingPush = null;
+function histBack(){
+  popSkip++; clearTimeout(popTimer);
+  popTimer = setTimeout(()=>{ popSkip = 0; flushPush(); }, 900); // rete di sicurezza se il popstate non arriva
+  history.back();
+}
+function histPush(state){ if(popSkip>0) pendingPush = state; else history.pushState(state,''); }
+function flushPush(){
+  const st = pendingPush; pendingPush = null; if(!st) return;
+  if((st.sheet && sheetOpen) || (st.drawer && $('#drawer').classList.contains('on'))) history.pushState(st,'');
+}
+
 /* --- drawer --- */
-function openDrawer(){ $('#drawer').classList.add('on'); $('#dscrim').classList.add('on'); history.pushState({drawer:1},''); }
-function closeDrawer(silent){ if(!$('#drawer').classList.contains('on')) return; $('#drawer').classList.remove('on'); $('#dscrim').classList.remove('on'); if(!silent && history.state?.drawer) history.back(); else if(silent && history.state?.drawer) history.replaceState(null,''); }
+function openDrawer(){ $('#drawer').classList.add('on'); $('#dscrim').classList.add('on'); histPush({drawer:1}); }
+function closeDrawer(silent){ if(!$('#drawer').classList.contains('on')) return; $('#drawer').classList.remove('on'); $('#dscrim').classList.remove('on');
+  if(pendingPush?.drawer){ pendingPush=null; return; }
+  if(!silent && history.state?.drawer) histBack(); else if(silent && history.state?.drawer) history.replaceState(null,''); }
 // swipe dal bordo sinistro per aprire il menu
 (()=>{ let x0=null,y0=null; addEventListener('touchstart',e=>{ const t=e.touches[0]; if(t.clientX<22 && !sheetOpen && !isDesktop()){ x0=t.clientX; y0=t.clientY; } },{passive:true});
   addEventListener('touchend',e=>{ if(x0===null) return; const t=e.changedTouches[0]; if(t.clientX-x0>60 && Math.abs(t.clientY-y0)<60) openDrawer(); x0=null; },{passive:true}); })();
@@ -199,21 +218,37 @@ function sheetHead(title,sub='',icon='',c='var(--accent)',s='var(--surface-3)',a
     <button class="iconbtn back-desk" data-act="close" aria-label="Chiudi">${ic('close')}</button></div>`;
 }
 // openSheet(head, body, rerender?) — rerender: funzione che ridisegna lo sheet dopo modifiche
+let sheetClearT = null;
 function openSheet(head, body, rerender){
   const sh = $('#sheet'); const keep = sheetOpen ? sh.scrollTop : 0;
+  clearTimeout(sheetClearT);
   sh.innerHTML = head + `<div class="sb">${body}</div>`;
   sheetRenderer = rerender || null;
-  if(!sheetOpen){ sheetOpen = true; sh.classList.add('on'); $('#scrim').classList.add('on'); sh.scrollTop = 0; history.pushState({sheet:1},''); document.body.style.overflow='hidden'; }
+  if(!sheetOpen){
+    sheetOpen = true; sh.inert = false; sh.removeAttribute('aria-hidden');
+    sh.classList.add('on'); $('#scrim').classList.add('on'); sh.scrollTop = 0; histPush({sheet:1}); document.body.style.overflow='hidden';
+  }
   else sh.scrollTop = keep;
 }
 function closeSheet(fromPop){
   if(!sheetOpen) return;
   sheetOpen = false; sheetRenderer = null;
-  $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on'); document.body.style.overflow='';
-  if(!fromPop && history.state?.sheet) history.back();
+  const sh = $('#sheet');
+  // niente più elementi attivi «invisibili»: tolgo il focus (tastiera del telefono) e rendo lo sheet inerte
+  if(sh.contains(document.activeElement)) document.activeElement.blur();
+  sh.inert = true; sh.setAttribute('aria-hidden','true');
+  sh.classList.remove('on'); $('#scrim').classList.remove('on'); document.body.style.overflow='';
+  clearTimeout(sheetClearT); sheetClearT = setTimeout(()=>{ if(!sheetOpen) sh.innerHTML=''; }, 400);
+  if(fromPop) return;
+  if(pendingPush?.sheet){ pendingPush = null; return; }     // l'apertura non era ancora in cronologia
+  if(history.state?.sheet) histBack();
 }
 addEventListener('popstate', () => {
-  if(confirmOpen){ closeConfirm(false); return; }
+  if(popSkip > 0){ // è il back lanciato dall'app: già gestito
+    popSkip--; if(!popSkip){ clearTimeout(popTimer); flushPush(); }
+    return;
+  }
+  if(confirmOpen){ closeConfirm(false); if(sheetOpen) history.pushState({sheet:1},''); return; } // il back chiude solo la conferma
   if(sheetOpen) closeSheet(true);
   if($('#drawer').classList.contains('on')){ $('#drawer').classList.remove('on'); $('#dscrim').classList.remove('on'); }
 });

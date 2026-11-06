@@ -60,14 +60,27 @@ const fixedInMonth = (f, mo) => f.rule==='monthly' || (f.months||[]).includes(mo
 function fixedPaid(f, m){
   return monthTx(m).some(t=>t.amt<0 && (f.tag_id==null || t.tag==f.tag_id) && Math.abs(Math.abs(t.amt)-f.amount) <= Math.max(1, f.amount*.03));
 }
+// stato manuale di una fissa in un mese: 'paid' (spuntata, già pagata) | 'skip' (esclusa questo mese) | undefined
+// colonna los_fixed_expenses.month_status = { "AAAA-MM": "paid" | "skip" }
+const fixedStatus = (f, m) => (f.month_status||{})[m];
+async function setFixedStatus(f, m, st){
+  const cur = {...(f.month_status||{})};
+  if(st) cur[m] = st; else delete cur[m];
+  await upd('fixed', f.id, {month_status: cur});
+}
+const fixedDueDate = (f, m) => { const [y,mo] = m.split('-').map(Number); return new Date(y,mo-1,Math.min(f.day,new Date(y,mo,0).getDate())); };
+// tutte le fisse attive previste nel mese m, con il loro stato
+function fixedOfMonth(m = curMonth()){
+  const mo = +m.slice(5)-1, T0 = today();
+  return DB.fixed.filter(f=>f.active && fixedInMonth(f,mo)).map(f=>{
+    const due = fixedDueDate(f,m), st = fixedStatus(f,m), auto = fixedPaid(f,m);
+    const state = st==='skip' ? 'skip' : st==='paid' ? 'paid' : auto ? 'auto' : due<T0 ? 'past' : 'due';
+    return {...f, due, state};
+  }).sort((a,b)=>a.due-b.due);
+}
+// fisse che l'analizzatore deve ancora sottrarre: in scadenza da oggi a fine mese, non pagate, non escluse
 function fixedDueRemaining(){
-  const T0=today(), y=T0.getFullYear(), mo=T0.getMonth(), m=curMonth(); const out=[];
-  DB.fixed.filter(f=>f.active).forEach(f=>{
-    if(!fixedInMonth(f,mo)) return;
-    const due = new Date(y,mo,Math.min(f.day,new Date(y,mo+1,0).getDate()));
-    if(due>=T0 && !fixedPaid(f,m)) out.push({...f,due});
-  });
-  return out.sort((a,b)=>a.due-b.due);
+  return fixedOfMonth(curMonth()).filter(f=>f.state==='due');
 }
 function nextFixedDate(f){
   const T0=today(); let d = new Date(T0.getFullYear(),T0.getMonth(),1);

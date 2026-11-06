@@ -42,6 +42,7 @@ async function loadTable(k){
   const o = ORDER[k]; if(o) q = q.order(o[0],{ascending:o[1]});
   DB[k] = chk(await q);
 }
+const normEvent = e => { e.done_dates = (e.done_dates||[]).map(d=>String(d).slice(0,10)); e.notice = +e.notice||0; return e; };
 const normTx = r => ({ id:r.id, date:String(r.data).slice(0,10), amt:Number(r.importo), note:r.note||'', tag:r.id_tag });
 
 async function loadAll(){
@@ -50,6 +51,7 @@ async function loadAll(){
   DB.settings = st?.data || {};
   DB.body.forEach(b=>{ ['weight','fat_kg','fat_pct','lean_kg','muscle_kg'].forEach(f=>b[f]=b[f]==null?null:Number(b[f])); });
   DB.fixed.forEach(f=>f.amount=Number(f.amount));
+  DB.events.forEach(normEvent);
   DB.accounts.forEach(a=>a.balance=Number(a.balance));
   DB.acchist.forEach(h=>h.balance=Number(h.balance));
 }
@@ -61,6 +63,7 @@ async function ins(k, row){
     const n = normTx(r); DB.tx.push(n); DB.tx.sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id); return n;
   }
   const r = chk(await sb.from(T[k]).insert(row).select().single());
+  if(k==='events') normEvent(r); if(k==='fixed') r.amount=Number(r.amount);
   DB[k].push(r); return r;
 }
 async function upd(k, id, patch, {optimistic=true}={}){
@@ -68,6 +71,7 @@ async function upd(k, id, patch, {optimistic=true}={}){
   if(optimistic && i>=0) Object.assign(list[i], k==='tx'?txPatchLocal(patch):patch);
   try{
     const r = chk(await sb.from(T[k]).update(patch).eq('id',id).select().single());
+    if(k==='events') normEvent(r); if(k==='fixed') r.amount=Number(r.amount);
     if(i>=0) list[i] = k==='tx' ? normTx(r) : r;
     return list[i];
   }catch(e){ if(before) list[i]=before; refresh(); throw e; }
@@ -81,6 +85,8 @@ async function del(k, id){
 }
 async function saveSettings(patch){
   Object.assign(DB.settings, patch);
+  // rileggo le impostazioni salvate (magari cambiate da un altro dispositivo) e applico solo la mia modifica
+  try{ const st = chk(await sb.from('los_settings').select('data').maybeSingle()); if(st?.data) DB.settings = {...st.data, ...patch}; }catch(e){}
   chk(await sb.from('los_settings').upsert({ user_id: DB.user.id, data: DB.settings }));
 }
 // tabelle con chiave composta

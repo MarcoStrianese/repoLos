@@ -43,7 +43,7 @@ function finPanoramica(){
   const mxCat = avgsCat[0]?.v||1;
   $('#finBody').innerHTML = `
   <div class="cols">
-    <div class="stack">${advisorCard(adv,false)}</div>
+    <div class="stack">${advisorCard(adv,false)}${fixedMonthCard(curMonth(),false)}</div>
     <div class="stack">
       <div class="grid2">
         <div class="card"><div class="eyebrow">Entrate medie</div><div class="big mono" style="font-size:24px;margin-top:6px;color:var(--good)">${eur0(avgIn)}</div><div class="faint" style="font-size:12px">al mese, ultimi ${Math.min(12,closed.length)} mesi</div></div>
@@ -208,11 +208,47 @@ FORM.fTx = async (f,v) => {
 /* ---------------- SPESE FISSE ---------------- */
 function finFisse(){
   const eq = fixedMonthlyEq();
+  S.fxMonth ||= curMonth();
   $('#finBody').innerHTML = `
-    <div class="card" style="background:var(--fin-soft);box-shadow:none"><div class="eyebrow" style="color:var(--fin)">Impegno fisso equivalente</div><div class="big mono" style="font-size:30px;margin-top:4px">${eur(eq)}<span class="muted" style="font-size:14px;font-family:var(--f-body);font-weight:500"> / mese</span></div><div class="muted small">L'analizzatore sottrae dal margine le fisse non ancora pagate questo mese. Tocca una voce per modificarla.</div></div>
+    ${fixedMonthCard(S.fxMonth,true)}
+    <div class="card" style="background:var(--fin-soft);box-shadow:none"><div class="eyebrow" style="color:var(--fin)">Impegno fisso equivalente</div><div class="big mono" style="font-size:30px;margin-top:4px">${eur(eq)}<span class="muted" style="font-size:14px;font-family:var(--f-body);font-weight:500"> / mese</span></div><div class="muted small">L'analizzatore sottrae dal margine le fisse non ancora pagate questo mese. Tocca una voce per modificarla; il segno di spunta a destra la sospende per tutti i mesi.</div></div>
+    <div class="section-h"><h2>Tutte le spese fisse</h2></div>
     <div class="card"><div class="list">${DB.fixed.map(f=>{const nx=nextFixedDate(f); return `<div class="li" style="${f.active?'':'opacity:.5'}"><button class="row grow" style="gap:12px;text-align:left;min-height:52px" data-act="fxedit" data-id="${f.id}"><div class="ico" style="--s:color-mix(in srgb,${tagColor(f.tag_id)} 15%,transparent);--c:${tagColor(f.tag_id)}">${ic('wallet')}</div><div class="grow"><div style="font-weight:600">${esc(f.name)}</div><div class="muted small">${f.rule==='monthly'?`ogni mese, il ${f.day}`:`${(f.months||[]).length} volte l'anno (${(f.months||[]).map(x=>MON[x-1]).join(', ')}), il ${f.day}`}${nx&&f.active?` · prossima ${fmtDay(nx)}`:''}${f.active?'':' · sospesa'}</div></div><span class="mono" style="font-weight:600">${eur(f.amount)}</span></button>
       <button class="check ${f.active?'on':''}" style="--c:var(--fin)" data-act="fxtoggle" data-id="${f.id}" aria-label="Attiva">${ic('check')}</button></div>`}).join('')||'<div class="empty">Nessuna spesa fissa</div>'}</div></div>`;
 }
+/* spese fisse del mese: spunta = già pagata, «Salta» = esclusa solo da quel mese */
+const FXST = {due:['neutral','da pagare'], past:['neutral','giorno passato'], paid:['good','pagata'], auto:['good','pagata · movimento trovato'], skip:['warn','esclusa questo mese']};
+function fixedMonthCard(m, nav){
+  const list = fixedOfMonth(m), isCur = m===curMonth();
+  const sum = st => list.filter(f=>st.includes(f.state)).reduce((s,f)=>s+f.amount,0);
+  const open = isCur ? sum(['due']) : sum(['due','past']);
+  return `<div class="card" id="fxMonth">
+    <div class="row"><div class="grow"><div class="eyebrow" style="color:var(--fin)">Spese fisse · ${ymLabel(m)}</div>
+      <div class="muted small" style="margin-top:2px">${isCur?'Ancora da sottrarre':'Previste'} <b class="mono" style="color:var(--ink)">${eur(open)}</b>${sum(['paid','auto'])?` · pagate ${eur0(sum(['paid','auto']))}`:''}${sum(['skip'])?` · escluse ${eur0(sum(['skip']))}`:''}</div></div>
+      ${nav?`<button class="iconbtn sm" data-act="fxm" data-n="-1" aria-label="Mese precedente" ${isCur?'disabled style="opacity:.3"':''}>${ic('left')}</button><button class="iconbtn sm" data-act="fxm" data-n="1" aria-label="Mese successivo" ${m>=ymAdd(curMonth(),12)?'disabled style="opacity:.3"':''}>${ic('right')}</button>`:''}</div>
+    <div class="list" style="margin-top:6px">${list.map(f=>{ const off = ['paid','auto','skip'].includes(f.state); const pl = FXST[f.state];
+      return `<div class="li fxm ${f.state}"><button class="check ${f.state==='paid'||f.state==='auto'?'on':''}" style="--c:var(--good)" data-act="fxpaid" data-id="${f.id}" data-m="${m}" aria-label="Segna come pagata" ${f.state==='skip'?'disabled':''}>${ic('check')}</button>
+        <div class="grow" style="min-width:0"><div style="font-weight:600;${off?'text-decoration:line-through;opacity:.6':''}">${esc(f.name)}</div><div class="muted small">il ${fmtDay(f.due)} · <span class="pill ${pl[0]}">${pl[1]}</span></div></div>
+        <span class="mono" style="font-weight:600;${off?'opacity:.5':''}">${eur(f.amount)}</span>
+        <button class="btn small ghost" style="min-height:40px;padding:0 10px" data-act="fxskip" data-id="${f.id}" data-m="${m}">${f.state==='skip'?'Riattiva':'Salta'}</button></div>`; }).join('')||'<div class="muted small" style="padding:8px 0">Nessuna spesa fissa prevista in questo mese</div>'}</div>
+    <div class="faint" style="font-size:12px;margin-top:8px">Spunta una voce se l'hai già pagata (anche senza movimento registrato): non viene più sottratta dal margine del mese. «Salta» la esclude solo da questo mese (es. quel mese non rinnovi la scheda).</div>
+  </div>`;
+}
+ACT.fxm = (el,D) => { const k=ymAdd(S.fxMonth||curMonth(),+D.n); if(k<curMonth()||k>ymAdd(curMonth(),12)) return; S.fxMonth=k; render(); };
+ACT.fxpaid = async (el,D) => {
+  const f = DB.fixed.find(x=>x.id==D.id); if(!f) return;
+  const st = fixedStatus(f,D.m);
+  if(!st && fixedPaid(f,D.m)){ toast('Risulta già pagata: c\'è un movimento di '+eur(f.amount)+' in questo mese'); return; }
+  const next = st==='paid' ? null : 'paid';
+  const pr = setFixedStatus(f,D.m,next); refresh(); await pr;
+  if(next) toast(f.name+' pagata: non entra più nel conteggio del mese',{undo:async()=>{ await setFixedStatus(f,D.m,null); refresh(); }});
+};
+ACT.fxskip = async (el,D) => {
+  const f = DB.fixed.find(x=>x.id==D.id); if(!f) return;
+  const next = fixedStatus(f,D.m)==='skip' ? null : 'skip';
+  const pr = setFixedStatus(f,D.m,next); refresh(); await pr;
+  toast(next ? f.name+' esclusa da '+ymLabel(D.m).toLowerCase() : f.name+' di nuovo nel conteggio');
+};
 ACT.fxtoggle = async (el,D) => { const f=DB.fixed.find(x=>x.id==D.id); const pr=upd('fixed',f.id,{active:!f.active}); render(); await pr; };
 ACT.newfixed = () => sheetFixed(null);
 ACT.fxedit = (el,D) => sheetFixed(+D.id);
